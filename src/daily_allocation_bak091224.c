@@ -91,6 +91,7 @@ ntemp_struct* nt, double naddfrac, int mode) /* mode is MODE_SPINUP or MODE_MODE
 	{
 		day_mresp = cf->leaf_day_mr + cf->leaf_night_mr + cf->froot_mr;
 	}
+	
 	avail_c = day_gpp - day_mresp;
 
 	/* no allocation when the daily C balance is negative */

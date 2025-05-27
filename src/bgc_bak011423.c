@@ -94,9 +94,6 @@ int bgc(bgcin_struct* bgcin, bgcout_struct* bgcout, int mode)
 	double inc = 0.01;
 	double this_stem_c = 0.0;
 	double last_stem_c = 0.0; //WJM 101721
-	double PRC, mu, s, m_psi_x_refill, leaf_psi; //WJM 101721
-// 	double m_psi_x_yesterday, new_livestem_leaf_c_ratio, max_daily_m_psi_x;//WJM 0323
-
 
 	/* mode == MODE_MODEL only */
 	double daily_ndep, daily_nfix, ndep_scalar, ndep_diff, ndep;
@@ -526,30 +523,21 @@ int bgc(bgcin_struct* bgcin, bgcout_struct* bgcout, int mode)
 			//only do during model
 // 			if(mode == MODE_MODEL){
 			//set at line 279,776: bak_turnover = epv.day_livestemc_turnover_increment;
-			//lose livewood at a rate proportional to PLC
-
-			//calculate turnover based on yesterdays sapwood plc
-// 				plc = 1-epv.m_psi_x;
-// 				//scale plc to interval to avoid 
-// //				plc = plc*0.3+0.7;
-// 				//plc = plc*0.75+0.25;
-// 				if(plc >= .99) {plc = .99;} else if (plc <= .01) {plc = .01;}
-// 				//divide out epc.livewood_turnover, multiply in PLC
-// 				//epv.day_livestemc_turnover_increment = (plc*bak_turnover*365.0)/(epc.livewood_turnover*164.0);
-// 				//mirrors calculation in annual_rates, assuming we are using evergreen phenology with 365 phen days
-// 				//daily update version WJM 0323
-// 				epv.day_livestemc_turnover_increment = cs.livestemc * plc / 365.0; //100.00;
-				
-				//epv.day_livestemc_turnover_increment = epv.annmax_livestemc * plc / 365.0;
-// 						printf("orig_turnover = = %f ; turnover = %f; plc = %f \n",\
-// 						         bak_turnover,epv.day_livestemc_turnover_increment, plc);
-/* 
+			//lose livewood gradually during dry season
+			if(yday>=350 || yday<150){
+				plc = 1-epv.m_psi_x;
+				//scale plc to interval
+//				plc = plc*0.3+0.7;
+				plc = plc*0.75+0.25;
+				//divide out epc.livewood_turnover, multiply in PLC
+				//epv.day_livestemc_turnover_increment = (plc*bak_turnover*365.0)/(epc.livewood_turnover*164.0);
+				//mirrors calculation in annual_rates
+				epv.day_livestemc_turnover_increment = epv.annmax_livestemc * plc / 164.0;
+						printf("orig_turnover = = %f ; livestemc_turnover = %f; plc_sc = %f ;;", bak_turnover,epv.day_livestemc_turnover_increment, plc);
  			} else {
- 				//don't lose sapwood to turnover during wet times
  				epv.day_livestemc_turnover_increment=0.0;
  				printf("orig_turnover = = %f ; livestemc_turnover = %f; plc_sc = %f ;;", bak_turnover,epv.day_livestemc_turnover_increment, plc);
  				}
- */
 			
 			/* phenology fluxes */
 			if (ok && phenology(&epc, &phen, &epv, &cs, &cf, &ns, &nf))
@@ -654,74 +642,16 @@ int bgc(bgcin_struct* bgcin, bgcout_struct* bgcout, int mode)
 // 				  bak_alloc_newstemc_newleafc = epc.alloc_newstemc_newleafc;
 // 				  epc.alloc_newstemc_newleafc = epc.alloc_newstemc_newleafc + plc*epc.alloc_newstemc_newleafc;
 // 			}
-
-			//vulnerability statistics to parameterize gaussian, use these only here
-//            mu = epc.psi_p_50;
-//            s = epc.s_psi_p_50;
-//           //PRC at refilling (should be close to 1), so all comparisons can be made in probability space
-//            m_psi_x_refill = 0.5 * erfc((mu - epc.psi_refill)/(sqrt(2.0)*s));
-//            m_psi_x_yesterday = epv.m_psi_x;
-//           //today's potential PRC = 1-PLC , vulnerability curve goes with yesterday's leaf psi
-//           // but need to compare with refilling water potential
-//           PRC = 0.5 * erfc((mu - epv.leaf_psi)/(sqrt(2.0)*s));
-          /*gamma distribtution version*/
-          // 	double k = vulnerability_shape;
-          // 	double theta = vulnerability_scale;
-          // 	double m_psi_x_refill = 0.5 * erfc((mu - psi_refill)/(sqrt(2.0)*s));
-          // 	double m_psi_x_soil = 0.5 * erfc((mu - epv->psi)/(sqrt(2.0)*s));
-          	/*set refill flag*/
-          // m_psi_x is updated only with capillary action (near zero SWP) or in allocation of new sapwood (daily_allocation)
-/* 
-          if(epv.psi > epc.psi_refill) { //allow refill with soil water potential; cannot use m_psi* here because m_psi goes to 1 before psi_refill for several taxa
-				epv.m_psi_x = PRC;//passive 'physical' refilling to current PRC
-			//	printf("refill ;");
-			} else { //not above refilling threshold
-				if (PRC < m_psi_x_yesterday){ //drier than yesterday
-					epv.m_psi_x = PRC;
-				//	printf("not wetter ;");
-				} else {//wetter than yesterday, but still below refilling threshold
-					epv.m_psi_x = m_psi_x_yesterday;//
-					printf("hysteresis ;"); 
+			livestem_leaf_c_ratio = cs.livestemc/cs.leafc;
+			printf("yday = %d ; livestemc per leafc = %f; leafc = %f \n",yday, livestem_leaf_c_ratio, cs.leafc);
+			/*recovery*/
+			if(yday>=150 && yday<250){
+				inc = 0.01;//((double)yday+1.0-150.0)/100.0;
+				epv.m_psi_x=epv.m_psi_x+inc;
+				//cs.cpool = cs.cpool-inc_c;//this is missing in the final accounting leading to error
+				if(epv.m_psi_x>=1.0){epv.m_psi_x=1.0;}
+				//printf("yday = %d ; inc = %f; regrow m_x = %f ; ",yday, inc ,epv.m_psi_x);
 				}
-			}
- */
- 
-//            if(epv.psi > epc.psi_refill) { //allow refill with soil water potential; cannot use m_psi* here because m_psi goes to 1 before psi_refill for several taxa
-// 				epv.m_psi_x = PRC;//passive 'physical' refilling to current PRC
-// 			//	printf("refill ;");
-// 			} else { //not above refilling threshold
-// 				if (epv.leaf_psi < m_psi_x_yesterday){ //drier than yesterday
-// 					epv.m_psi_x = PRC;
-// 				//	printf("not wetter ;");
-// 				} else {//wetter than yesterday, but still below refilling threshold
-// 					epv.m_psi_x = m_psi_x_yesterday;//
-// 					printf("hysteresis ;"); 
-// 				}
-// 			}
-// 			
-			
-	/*WJM 1021 find out how much live stem there is relative to the prescribed allometry
-    scale maybe have to cap at the prescribed allometry?*/
-    //WJM 0323 moved to bgc.c, after phenology and allocation
-//     livestem_leaf_c_ratio = cs.livestemc/cs.leafc;
-//     new_livestem_leaf_c_ratio = epc.alloc_newstemc_newleafc*epc.alloc_newlivewoodc_newwoodc;
-//     max_daily_m_psi_x = livestem_leaf_c_ratio/new_livestem_leaf_c_ratio;
-
-			
-			
-// 			if(epv.m_psi_x > max_daily_m_psi_x){
-// 				epv.m_psi_x = max_daily_m_psi_x;
-// 			}
-			
-
-			/*recovery during wet times, increase to 1, 1 percent per day*/
-// 			if(epv.m_psi_x >= 0.25){
-// 				inc = 0.01;//((double)yday+1.0-150.0)/100.0;
-// 				epv.m_psi_x=epv.m_psi_x+inc;
-// 				//cs.cpool = cs.cpool-inc_c;//this is missing in the final accounting leading to error
-// 				if(epv.m_psi_x>=1.0){epv.m_psi_x=1.0;}
-// 				//printf("yday = %d ; inc = %f; regrow m_x = %f ; ",yday, inc ,epv.m_psi_x);
-// 				}
 
 		 //end xylem growing season (currently arbitrary)
 // 			if(yday == 250){
@@ -729,7 +659,6 @@ int bgc(bgcin_struct* bgcin, bgcout_struct* bgcout, int mode)
 // 			  epc.alloc_newstemc_newleafc = bak_alloc_newstemc_newleafc; 
 // 			}
 				
-//										,epv->psi, max_daily_m_psi_x, m_psi_x, m_psi_x_soil , m_psi_x_yesterday , m_psi, gl_t_wv_sun, proj_lai);
 			/*end WJM 1021*/
 				
 			if (ok && cs.leafc && metv.dayl)

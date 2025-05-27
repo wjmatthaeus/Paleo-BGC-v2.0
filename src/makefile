@@ -12,7 +12,7 @@ LDFLAGS_GENERIC = -lm
 
 CFLAGS = ${CFLAGS_GENERIC}
 LDFLAGS = ${LDFLAGS_GENERIC}
-CC = clang
+CC = gcc
 
 OBJS = bgc.o output_map_init.o make_zero_flux_struct.o atm_pres.o \
 	prephenology.o restart_io.o firstday.o zero_srcsnk.o daymet.o \

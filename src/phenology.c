@@ -20,6 +20,12 @@ nflux_struct* nf)
 	double livestemtovrc, livestemtovrn;
 	double livecroottovrc, livecroottovrn;
 	double drate;
+	double livestem_leaf_c_ratio, new_livestem_leaf_c_ratio, max_daily_m_psi_x;
+	
+	 //WJM 0323 also calculated in bgc.c (683), after phenology and allocation
+       livestem_leaf_c_ratio = cs->livestemc/cs->leafc;
+       new_livestem_leaf_c_ratio = epc->alloc_newstemc_newleafc*epc->alloc_newlivewoodc_newwoodc;
+       max_daily_m_psi_x = livestem_leaf_c_ratio/new_livestem_leaf_c_ratio;
 	
 	/* phenological control for EVERGREENS */
 	if (epc->evergreen)
@@ -78,6 +84,7 @@ nflux_struct* nf)
 		if (epc->woody)
 		{
 			/* turnover from live stem wood to dead stem wood */
+			// WJM 0323: reset day_livestemc_turnover_increment, bgc.c 541
 			livestemtovrc = epv->day_livestemc_turnover_increment;
 			livestemtovrn = livestemtovrc / epc->livewood_cn;
 			if (livestemtovrc > cs->livestemc) livestemtovrc = cs->livestemc;
