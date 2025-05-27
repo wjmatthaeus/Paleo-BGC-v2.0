@@ -27,11 +27,11 @@ epvar_struct* epv, wflux_struct* wf, const cstate_struct* cs,int verbose)
 	double max_mesophyll_path, min_mesophyll_path;
 	double Kl_max, Kl_min, Kl;  /* leaf hydraulic conductivity mmol/m2/s/MPa  */
 	double Kl_psi_slope, Kl_psi_intercept;
-	double psi_p_50,s_psi_p_50, psi_refill; /*WJM 0821*/
-	double livestem_leaf_c_ratio, new_livestem_leaf_c_ratio, max_daily_m_psi_x;//WJM 1021
+	double psi_p_50,s_psi_p_50, psi_refill, soil_psi_today, leaf_psi_yesterday, leaf_psi_today; /*WJM 0821*/
+	double livestem_leaf_c_ratio, new_livestem_leaf_c_ratio, r_max;//WJM 1021
 	double m_ppfd_sun, m_ppfd_shade;
 	double m_tmin, m_psi, m_co2, m_vpd, m_final_sun, m_final_shade, m_Kl;
-	double m_psi_x_yesterday, m_psi_x_today, m_psi_x;
+	double m_psi_x_yesterday, m_psi_x,PRC;
 //	bool allow_refill;
 	double proj_lai;
 	double canopy_w;
@@ -63,11 +63,11 @@ epvar_struct* epv, wflux_struct* wf, const cstate_struct* cs,int verbose)
        // allow_refill = epv->allow_refill;
        
        /*WJM 1021 find out how much live stem there is relative to the prescribed allometry
-       scale
-       maybe have to cap at the prescribed allometry?*/
+       scale  (r_max is the maximum daily m_psi_x)
+       capped sapwood allocation when sapwood c is twice the prescribed allometry?*/
        livestem_leaf_c_ratio = cs->livestemc/cs->leafc;
        new_livestem_leaf_c_ratio = epc->alloc_newstemc_newleafc*epc->alloc_newlivewoodc_newwoodc;
-       max_daily_m_psi_x = livestem_leaf_c_ratio/new_livestem_leaf_c_ratio;
+       r_max = livestem_leaf_c_ratio/new_livestem_leaf_c_ratio;
        
 
 	/* temperature and pressure correction factor for conductances */
@@ -135,6 +135,8 @@ epvar_struct* epv, wflux_struct* wf, const cstate_struct* cs,int verbose)
 	/* removed to test impact of leaf psi definition */
 	psi = psi - (1/Kl) * epc->gl_smax * 40.0;
 
+    //save yesterday's leaf psi for calculating m_psi_x
+	leaf_psi_yesterday = epv->leaf_psi;
         epv->leaf_psi = psi;
 
 	/* soil-leaf water potential multiplier */
@@ -166,11 +168,11 @@ epvar_struct* epv, wflux_struct* wf, const cstate_struct* cs,int verbose)
 // 	double theta = vulnerability_scale;
 // 	double m_psi_x_refill = 0.5 * erfc((mu - psi_refill)/(sqrt(2.0)*s));
 // 	double m_psi_x_soil = 0.5 * erfc((mu - epv->psi)/(sqrt(2.0)*s));
-	/*set refill flag*/
-
-	//today's m_psi_x = PRC = 1-PLC if refilling is allowed or if yesterday's was higher
+	/*save yesterdays m_x*/
+	m_psi_x_yesterday = epv->m_psi_x;
+	//today's PRC = 1-PLC if refilling is allowed or if yesterday's was higher
 	//if refilling goes with leaf psi
-	m_psi_x_today = 0.5 * erfc((mu - psi)/(sqrt(2.0)*s));
+	PRC = 0.5 * erfc((mu - psi)/(sqrt(2.0)*s));
 	//if plc also goes with soil psi
 	//m_psi_x_today = m_psi_x_soil;
 	//worry about underflow with erfc? guaranteed underflow if argument is g.t. 26.55
@@ -178,24 +180,46 @@ epvar_struct* epv, wflux_struct* wf, const cstate_struct* cs,int verbose)
 	
 /*since m_psi_x is increasing, psi > psi_yesterday -> m_psi_x > m_psi_x_yesterday... etc*/
 
-//is this still not right? refill based on psi not m_psi
+// refill based on psi not m_psi
+// 		if(epv->psi > psi_refill) { //allow refill; cannot use m_psi* here because m_psi goes to 1 before psi_refill for several taxa
+// 				m_psi_x = m_psi_x_today;//+0.0001; //passive 'physical' refilling minimum?
+// 			//	printf("refill ;");
+// 			} else { //not above refilling threshold
+// 				if (m_psi_x_today < m_psi_x_yesterday){ //drier than yesterday
+// 					m_psi_x = m_psi_x_today;
+// 				//	printf("not wetter ;");
+// 				} else {//wetter than yesterday, but still below refilling threshold
+// 					m_psi_x = m_psi_x_yesterday;//+0.0001; //passive 'physical' refilling minimum?
+// 				//	printf("hysteresis ;");
+// 				}
+// 			}
+// 			
+// 			if(m_psi_x > max_daily_m_psi_x){
+// 				m_psi_x = max_daily_m_psi_x;
+// 			}
+			//maybe cap at prescribed allometry here
+
 		if(epv->psi > psi_refill) { //allow refill; cannot use m_psi* here because m_psi goes to 1 before psi_refill for several taxa
-				m_psi_x = m_psi_x_today;//+0.0001; //passive 'physical' refilling minimum?
-			//	printf("refill ;");
-			} else { //not above refilling threshold
-				if (m_psi_x_today < m_psi_x_yesterday){ //drier than yesterday
-					m_psi_x = m_psi_x_today;
-				//	printf("not wetter ;");
+				m_psi_x = PRC;//+0.0001; //passive 'physical' refilling minimum?
+				//printf("refill ;");
+			} else { //not above refilling threshold, take the lower of PRC and m_psi_x_yesterday
+				if (PRC < m_psi_x_yesterday){ //drier than yesterday, or growth recovery overshot water limitation
+					m_psi_x = PRC;
+					//printf("not wetter ;");
 				} else {//wetter than yesterday, but still below refilling threshold
 					m_psi_x = m_psi_x_yesterday;//+0.0001; //passive 'physical' refilling minimum?
-				//	printf("hysteresis ;");
+					//printf("hysteresis ;");
 				}
 			}
-			
-			if(m_psi_x > max_daily_m_psi_x){
-				m_psi_x = max_daily_m_psi_x;
-			}
-			//maybe cap at prescribed allometry here
+
+// cap stomatal conductance according to allometric ratio found above (65)
+// 			if(m_psi_x > r_max){
+// 				m_psi_x = r_max;
+// 				//printf("m_psi_x capped");
+// 			}
+
+
+
 
 	/* CO2 multiplier */
 	m_co2 = 1.0;
@@ -245,6 +269,9 @@ epvar_struct* epv, wflux_struct* wf, const cstate_struct* cs,int verbose)
 		gl_s_shade = 0.0;
 	}
 
+
+ 				//printf(" l_psi = %f; l_psi_y = %f ; r_mx = %f ; m_x = %f ; PRC = %f ; m_x_y = %f, gls = %f \n "\
+ 							,epv->leaf_psi, leaf_psi_yesterday, r_max, m_psi_x, PRC, m_psi_x_yesterday, gl_s_sun);
 	/* calculate leaf-and canopy-level conductances to water vapor and
 	sensible heat fluxes, to be used in Penman-Monteith calculations of
 	canopy evaporation and canopy transpiration. */
@@ -276,8 +303,7 @@ epvar_struct* epv, wflux_struct* wf, const cstate_struct* cs,int verbose)
 		    (gl_bl * (gl_s_shade + gl_c) + gm * gl_bl  + gm * (gl_s_shade + gl_c));
 
         
-							printf(" psi = %f; max_m_x = %f ; m_x = %f ; m_x_soil = %f ; m_x_yest = %f ; m_psi = %f ; gl = %f ; lai = %f\n "\
-										,epv->psi, max_daily_m_psi_x, m_psi_x, m_psi_x_soil , m_psi_x_yesterday , m_psi, gl_t_wv_sun, proj_lai);
+
 
 	/* Leaf conductance to sensible heat, per unit all-sided LAI */
 	gl_sh = gl_bl;
